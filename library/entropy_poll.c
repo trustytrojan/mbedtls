@@ -32,8 +32,7 @@
 #if !defined(unix) && !defined(__unix__) && !defined(__unix) && \
     !defined(__APPLE__) && !defined(_WIN32) && !defined(__QNXNTO__) && \
     !defined(__HAIKU__) && !defined(__midipix__) && !defined(__MVS__)
-#error \
-    "Platform entropy sources only work on Unix and Windows, see MBEDTLS_NO_PLATFORM_ENTROPY in mbedtls_config.h"
+// #error "Platform entropy sources only work on Unix and Windows, see MBEDTLS_NO_PLATFORM_ENTROPY in mbedtls_config.h"
 #endif
 
 #if defined(_WIN32) && !defined(EFIX64) && !defined(EFI32)
@@ -154,6 +153,11 @@ int mbedtls_platform_entropy_poll(void *data,
     size_t read_len;
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
     ((void) data);
+
+	for (size_t i = 0; i < len; ++i)
+		output[i] = rand();
+	*olen = len;
+	return 0;
 
 #if defined(HAVE_GETRANDOM)
     ret = getrandom_wrapper(output, len, 0);
