@@ -26,6 +26,9 @@ include(CMakePackageConfigHelpers)
 # cmake_print_properties(), cmake_print_variables().
 include(CMakePrintHelpers)
 
+# LET ME TURN OFF PROGRAMS AND TESTING
+cmake_policy(SET CMP0077 NEW)
+
 # https://cmake.org/cmake/help/latest/policy/CMP0011.html
 # Setting this policy is required in CMake >= 3.18.0, otherwise a warning is generated. The OLD
 # policy setting is deprecated, and will be removed in future versions.
