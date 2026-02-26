@@ -3,15 +3,7 @@ Mbed TLS sample programs
 
 This subdirectory mostly contains sample programs that illustrate specific features of the library, as well as a few test and support programs.
 
-### Generic public-key cryptography (`pk`) examples
-
-* [`pkey/gen_key.c`](pkey/gen_key.c): generates a key for any of the supported public-key algorithms (RSA or ECC) and writes it to a file that can be used by the other pk sample programs.
-
-* [`pkey/pk_sign.c`](pkey/pk_sign.c), [`pkey/pk_verify.c`](pkey/pk_verify.c): loads a PEM or DER private/public key file and uses the key to sign/verify a short string.
-
-### ECDSA and RSA signature examples
-
-* [`pkey/rsa_sign_pss.c`](pkey/rsa_sign_pss.c), [`pkey/rsa_verify_pss.c`](pkey/rsa_verify_pss.c): loads an RSA private/public key and uses it to sign/verify a short string with the RSASSA-PSS algorithm.
+We try to ensure that the sample programs are good examples of how to use Mbed TLS but we make no hard guarantees about their security. They should not be used in production unless they have been separately tested and thoroughly audited for security. Note that this means vulnerabilities in the sample programs are out of the scope of our usual security process and will be fixed in public.
 
 ### SSL/TLS sample applications
 

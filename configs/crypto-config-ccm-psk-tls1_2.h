@@ -26,11 +26,11 @@
 #define MBEDTLS_PSA_CRYPTO_C
 
 /* System support */
-//#define MBEDTLS_HAVE_TIME /* Optionally used in Hello messages */
+/* Optionally used in Hello messages. Needed for DTLS testing. */
+#define MBEDTLS_HAVE_TIME
 /* Other MBEDTLS_HAVE_XXX flags irrelevant for this configuration */
 
 #define MBEDTLS_CTR_DRBG_C
-#define MBEDTLS_ENTROPY_C
 #define MBEDTLS_PSA_BUILTIN_GET_ENTROPY
 
 /* Save RAM at the expense of ROM */

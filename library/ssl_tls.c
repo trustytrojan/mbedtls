@@ -29,8 +29,7 @@
 #include <string.h>
 
 #include "mbedtls/psa_util.h"
-#include "md_psa.h"
-#include "psa_util_internal.h"
+#include "md_psa.h" // for mbedtls_md_error_from_psa()
 #include "psa/crypto.h"
 
 #if defined(MBEDTLS_X509_CRT_PARSE_C)
@@ -680,7 +679,7 @@ const char *mbedtls_ssl_get_extension_name(unsigned int extension_type)
         mbedtls_ssl_get_extension_id(extension_type)];
 }
 
-static const char *ssl_tls13_get_hs_msg_name(int hs_msg_type)
+const char *mbedtls_ssl_get_hs_msg_name(int hs_msg_type)
 {
     switch (hs_msg_type) {
         case MBEDTLS_SSL_HS_CLIENT_HELLO:
@@ -695,8 +694,16 @@ static const char *ssl_tls13_get_hs_msg_name(int hs_msg_type)
             return "EncryptedExtensions";
         case MBEDTLS_SSL_HS_CERTIFICATE:
             return "Certificate";
+        case MBEDTLS_SSL_HS_SERVER_KEY_EXCHANGE:
+            return "ServerKeyExchange";
         case MBEDTLS_SSL_HS_CERTIFICATE_REQUEST:
             return "CertificateRequest";
+        case MBEDTLS_SSL_HS_CERTIFICATE_VERIFY:
+            return "CertificateVerify";
+        case MBEDTLS_SSL_HS_CLIENT_KEY_EXCHANGE:
+            return "ClientKeyExchange";
+        case MBEDTLS_SSL_HS_FINISHED:
+            return "Finished";
     }
     return "Unknown";
 }
@@ -711,7 +718,7 @@ void mbedtls_ssl_print_extension(const mbedtls_ssl_context *ssl,
         mbedtls_debug_print_msg(
             ssl, level, file, line,
             "%s: %s(%u) extension %s %s.",
-            ssl_tls13_get_hs_msg_name(hs_msg_type),
+            mbedtls_ssl_get_hs_msg_name(hs_msg_type),
             mbedtls_ssl_get_extension_name(extension_type),
             extension_type,
             extra_msg0, extra_msg1);
@@ -722,7 +729,7 @@ void mbedtls_ssl_print_extension(const mbedtls_ssl_context *ssl,
     if (extra_msg) {
         mbedtls_debug_print_msg(
             ssl, level, file, line,
-            "%s: %s(%u) extension %s.", ssl_tls13_get_hs_msg_name(hs_msg_type),
+            "%s: %s(%u) extension %s.", mbedtls_ssl_get_hs_msg_name(hs_msg_type),
             mbedtls_ssl_get_extension_name(extension_type), extension_type,
             extra_msg);
         return;
@@ -730,7 +737,7 @@ void mbedtls_ssl_print_extension(const mbedtls_ssl_context *ssl,
 
     mbedtls_debug_print_msg(
         ssl, level, file, line,
-        "%s: %s(%u) extension.", ssl_tls13_get_hs_msg_name(hs_msg_type),
+        "%s: %s(%u) extension.", mbedtls_ssl_get_hs_msg_name(hs_msg_type),
         mbedtls_ssl_get_extension_name(extension_type), extension_type);
 }
 
@@ -1066,73 +1073,6 @@ static int ssl_handshake_init(mbedtls_ssl_context *ssl)
         mbedtls_ssl_set_timer(ssl, 0);
     }
 #endif
-
-#if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
-#if !defined(MBEDTLS_DEPRECATED_REMOVED)
-#if defined(MBEDTLS_SSL_PROTO_TLS1_2)
-    /* Heap allocate and translate sig_hashes from internal hash identifiers to
-       signature algorithms IANA identifiers.  */
-    if (mbedtls_ssl_conf_is_tls12_only(ssl->conf) &&
-        ssl->conf->sig_hashes != NULL) {
-        const int *md;
-        const int *sig_hashes = ssl->conf->sig_hashes;
-        size_t sig_algs_len = 0;
-        uint16_t *p;
-
-        MBEDTLS_STATIC_ASSERT(MBEDTLS_SSL_MAX_SIG_ALG_LIST_LEN
-                              <= (SIZE_MAX - (2 * sizeof(uint16_t))),
-                              "MBEDTLS_SSL_MAX_SIG_ALG_LIST_LEN too big");
-
-        for (md = sig_hashes; *md != MBEDTLS_MD_NONE; md++) {
-            if (mbedtls_ssl_hash_from_md_alg(*md) == MBEDTLS_SSL_HASH_NONE) {
-                continue;
-            }
-#if defined(MBEDTLS_KEY_EXCHANGE_ECDSA_CERT_REQ_ALLOWED_ENABLED)
-            sig_algs_len += sizeof(uint16_t);
-#endif
-
-#if defined(MBEDTLS_RSA_C)
-            sig_algs_len += sizeof(uint16_t);
-#endif
-            if (sig_algs_len > MBEDTLS_SSL_MAX_SIG_ALG_LIST_LEN) {
-                return MBEDTLS_ERR_SSL_BAD_CONFIG;
-            }
-        }
-
-        if (sig_algs_len < MBEDTLS_SSL_MIN_SIG_ALG_LIST_LEN) {
-            return MBEDTLS_ERR_SSL_BAD_CONFIG;
-        }
-
-        ssl->handshake->sig_algs = mbedtls_calloc(1, sig_algs_len +
-                                                  sizeof(uint16_t));
-        if (ssl->handshake->sig_algs == NULL) {
-            return MBEDTLS_ERR_SSL_ALLOC_FAILED;
-        }
-
-        p = (uint16_t *) ssl->handshake->sig_algs;
-        for (md = sig_hashes; *md != MBEDTLS_MD_NONE; md++) {
-            unsigned char hash = mbedtls_ssl_hash_from_md_alg(*md);
-            if (hash == MBEDTLS_SSL_HASH_NONE) {
-                continue;
-            }
-#if defined(MBEDTLS_KEY_EXCHANGE_ECDSA_CERT_REQ_ALLOWED_ENABLED)
-            *p = ((hash << 8) | MBEDTLS_SSL_SIG_ECDSA);
-            p++;
-#endif
-#if defined(MBEDTLS_RSA_C)
-            *p = ((hash << 8) | MBEDTLS_SSL_SIG_RSA);
-            p++;
-#endif
-        }
-        *p = MBEDTLS_TLS_SIG_NONE;
-        ssl->handshake->sig_algs_heap_allocated = 1;
-    } else
-#endif /* MBEDTLS_SSL_PROTO_TLS1_2 */
-    {
-        ssl->handshake->sig_algs_heap_allocated = 0;
-    }
-#endif /* !MBEDTLS_DEPRECATED_REMOVED */
-#endif /* MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED */
     return 0;
 }
 
@@ -1364,6 +1304,8 @@ void mbedtls_ssl_session_reset_msg_layer(mbedtls_ssl_context *ssl,
         memset(ssl->in_buf, 0, in_buf_len);
     }
 
+    ssl->in_fatal_alert_recv = 0;
+    ssl->in_fatal_alert_type = 0;
     ssl->send_alert = 0;
 
     /* Reset outgoing message writing */
@@ -1820,14 +1762,13 @@ static psa_status_t mbedtls_ssl_set_hs_ecjpake_password_common(
     size_t user_len = 0;
     const uint8_t *peer = NULL;
     size_t peer_len = 0;
-    psa_pake_cs_set_algorithm(&cipher_suite, PSA_ALG_JPAKE);
+    psa_pake_cs_set_algorithm(&cipher_suite, PSA_ALG_JPAKE(PSA_ALG_SHA_256));
     psa_pake_cs_set_primitive(&cipher_suite,
                               PSA_PAKE_PRIMITIVE(PSA_PAKE_PRIMITIVE_TYPE_ECC,
                                                  PSA_ECC_FAMILY_SECP_R1,
                                                  256));
-    psa_pake_cs_set_hash(&cipher_suite, PSA_ALG_SHA_256);
 
-    status = psa_pake_setup(&ssl->handshake->psa_pake_ctx, &cipher_suite);
+    status = psa_pake_setup(&ssl->handshake->psa_pake_ctx, pwd, &cipher_suite);
     if (status != PSA_SUCCESS) {
         return status;
     }
@@ -1854,11 +1795,6 @@ static psa_status_t mbedtls_ssl_set_hs_ecjpake_password_common(
         return status;
     }
 
-    status = psa_pake_set_password_key(&ssl->handshake->psa_pake_ctx, pwd);
-    if (status != PSA_SUCCESS) {
-        return status;
-    }
-
     ssl->handshake->psa_pake_ctx_is_ok = 1;
 
     return PSA_SUCCESS;
@@ -1881,7 +1817,7 @@ int mbedtls_ssl_set_hs_ecjpake_password(mbedtls_ssl_context *ssl,
     }
 
     psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_DERIVE);
-    psa_set_key_algorithm(&attributes, PSA_ALG_JPAKE);
+    psa_set_key_algorithm(&attributes, PSA_ALG_JPAKE(PSA_ALG_SHA_256));
     psa_set_key_type(&attributes, PSA_KEY_TYPE_PASSWORD);
 
     status = psa_import_key(&attributes, pw, pw_len,
@@ -2425,27 +2361,68 @@ psa_status_t mbedtls_ssl_cipher_to_psa(mbedtls_cipher_type_t mbedtls_cipher_type
 }
 
 #if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
-#if !defined(MBEDTLS_DEPRECATED_REMOVED) && defined(MBEDTLS_SSL_PROTO_TLS1_2)
-/*
- * Set allowed/preferred hashes for handshake signatures
- */
-void mbedtls_ssl_conf_sig_hashes(mbedtls_ssl_config *conf,
-                                 const int *hashes)
-{
-    conf->sig_hashes = hashes;
-}
-#endif /* !MBEDTLS_DEPRECATED_REMOVED && MBEDTLS_SSL_PROTO_TLS1_2 */
 
 /* Configure allowed signature algorithms for handshake */
 void mbedtls_ssl_conf_sig_algs(mbedtls_ssl_config *conf,
                                const uint16_t *sig_algs)
 {
-#if !defined(MBEDTLS_DEPRECATED_REMOVED)
-    conf->sig_hashes = NULL;
-#endif /* !MBEDTLS_DEPRECATED_REMOVED */
     conf->sig_algs = sig_algs;
 }
 #endif /* MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED */
+
+/* The selection should be the same as mbedtls_x509_crt_profile_default in
+ * x509_crt.c, plus Montgomery curves for ECDHE. Here, the order matters:
+ * curves with a lower resource usage come first.
+ * See the documentation of mbedtls_ssl_conf_groups() for what we promise
+ * about this list.
+ */
+static const uint16_t ssl_preset_default_groups[] = {
+#if defined(PSA_WANT_ECC_MONTGOMERY_255)
+    MBEDTLS_SSL_IANA_TLS_GROUP_X25519,
+#endif
+#if defined(PSA_WANT_ECC_SECP_R1_256)
+    MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1,
+#endif
+#if defined(PSA_WANT_ECC_SECP_R1_384)
+    MBEDTLS_SSL_IANA_TLS_GROUP_SECP384R1,
+#endif
+#if defined(PSA_WANT_ECC_MONTGOMERY_448)
+    MBEDTLS_SSL_IANA_TLS_GROUP_X448,
+#endif
+#if defined(PSA_WANT_ECC_SECP_R1_521)
+    MBEDTLS_SSL_IANA_TLS_GROUP_SECP521R1,
+#endif
+#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_256)
+    MBEDTLS_SSL_IANA_TLS_GROUP_BP256R1,
+#endif
+#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_384)
+    MBEDTLS_SSL_IANA_TLS_GROUP_BP384R1,
+#endif
+#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_512)
+    MBEDTLS_SSL_IANA_TLS_GROUP_BP512R1,
+#endif
+#if defined(PSA_WANT_DH_RFC7919_2048)
+    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE2048,
+#endif
+#if defined(PSA_WANT_DH_RFC7919_3072)
+    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE3072,
+#endif
+#if defined(PSA_WANT_DH_RFC7919_4096)
+    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE4096,
+#endif
+#if defined(PSA_WANT_DH_RFC7919_6144)
+    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE6144,
+#endif
+#if defined(PSA_WANT_DH_RFC7919_8192)
+    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE8192,
+#endif
+    MBEDTLS_SSL_IANA_TLS_GROUP_NONE
+};
+
+const uint16_t *mbedtls_ssl_get_supported_group_list(void)
+{
+    return ssl_preset_default_groups;
+}
 
 /*
  * Set the allowed groups
@@ -2637,18 +2614,6 @@ void mbedtls_ssl_get_dtls_srtp_negotiation_result(const mbedtls_ssl_context *ssl
     }
 }
 #endif /* MBEDTLS_SSL_DTLS_SRTP */
-
-#if !defined(MBEDTLS_DEPRECATED_REMOVED)
-void mbedtls_ssl_conf_max_version(mbedtls_ssl_config *conf, int major, int minor)
-{
-    conf->max_tls_version = (mbedtls_ssl_protocol_version) ((major << 8) | minor);
-}
-
-void mbedtls_ssl_conf_min_version(mbedtls_ssl_config *conf, int major, int minor)
-{
-    conf->min_tls_version = (mbedtls_ssl_protocol_version) ((major << 8) | minor);
-}
-#endif /* MBEDTLS_DEPRECATED_REMOVED */
 
 #if defined(MBEDTLS_SSL_SRV_C)
 void mbedtls_ssl_conf_cert_req_ca_list(mbedtls_ssl_config *conf,
@@ -3276,7 +3241,7 @@ static int ssl_tls12_session_load(mbedtls_ssl_session *session,
     start = MBEDTLS_GET_UINT64_BE(p, 0);
     p += 8;
 
-    session->start = (time_t) start;
+    session->start = (mbedtls_time_t) start;
 #endif /* MBEDTLS_HAVE_TIME */
 
     /*
@@ -4345,8 +4310,8 @@ static int ssl_write_hello_request(mbedtls_ssl_context *ssl)
     ssl->out_msgtype = MBEDTLS_SSL_MSG_HANDSHAKE;
     ssl->out_msg[0]  = MBEDTLS_SSL_HS_HELLO_REQUEST;
 
-    if ((ret = mbedtls_ssl_write_handshake_msg(ssl)) != 0) {
-        MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg", ret);
+    if ((ret = mbedtls_ssl_write_handshake_msg_ext(ssl, 1, 1)) != 0) {
+        MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg_ext", ret);
         return ret;
     }
 
@@ -4465,22 +4430,7 @@ void mbedtls_ssl_handshake_free(mbedtls_ssl_context *ssl)
         return;
     }
 
-#if defined(PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY)
-#if !defined(MBEDTLS_DEPRECATED_REMOVED)
-    if (ssl->handshake->group_list_heap_allocated) {
-        mbedtls_free((void *) handshake->group_list);
-    }
-    handshake->group_list = NULL;
-#endif /* MBEDTLS_DEPRECATED_REMOVED */
-#endif /* PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY */
-
 #if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
-#if !defined(MBEDTLS_DEPRECATED_REMOVED)
-    if (ssl->handshake->sig_algs_heap_allocated) {
-        mbedtls_free((void *) handshake->sig_algs);
-    }
-    handshake->sig_algs = NULL;
-#endif /* MBEDTLS_DEPRECATED_REMOVED */
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
     if (ssl->handshake->certificate_request_context) {
         mbedtls_free((void *) handshake->certificate_request_context);
@@ -5277,47 +5227,6 @@ void mbedtls_ssl_config_init(mbedtls_ssl_config *conf)
     memset(conf, 0, sizeof(mbedtls_ssl_config));
 }
 
-/* The selection should be the same as mbedtls_x509_crt_profile_default in
- * x509_crt.c, plus Montgomery curves for ECDHE. Here, the order matters:
- * curves with a lower resource usage come first.
- * See the documentation of mbedtls_ssl_conf_groups() for what we promise
- * about this list.
- */
-static const uint16_t ssl_preset_default_groups[] = {
-#if defined(PSA_WANT_ECC_MONTGOMERY_255)
-    MBEDTLS_SSL_IANA_TLS_GROUP_X25519,
-#endif
-#if defined(PSA_WANT_ECC_SECP_R1_256)
-    MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1,
-#endif
-#if defined(PSA_WANT_ECC_SECP_R1_384)
-    MBEDTLS_SSL_IANA_TLS_GROUP_SECP384R1,
-#endif
-#if defined(PSA_WANT_ECC_MONTGOMERY_448)
-    MBEDTLS_SSL_IANA_TLS_GROUP_X448,
-#endif
-#if defined(PSA_WANT_ECC_SECP_R1_521)
-    MBEDTLS_SSL_IANA_TLS_GROUP_SECP521R1,
-#endif
-#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_256)
-    MBEDTLS_SSL_IANA_TLS_GROUP_BP256R1,
-#endif
-#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_384)
-    MBEDTLS_SSL_IANA_TLS_GROUP_BP384R1,
-#endif
-#if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_512)
-    MBEDTLS_SSL_IANA_TLS_GROUP_BP512R1,
-#endif
-#if defined(PSA_WANT_ALG_FFDH)
-    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE2048,
-    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE3072,
-    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE4096,
-    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE6144,
-    MBEDTLS_SSL_IANA_TLS_GROUP_FFDHE8192,
-#endif
-    MBEDTLS_SSL_IANA_TLS_GROUP_NONE
-};
-
 static const int ssl_preset_suiteb_ciphersuites[] = {
     MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
     MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
@@ -5719,45 +5628,46 @@ void mbedtls_ssl_config_free(mbedtls_ssl_config *conf)
  */
 unsigned char mbedtls_ssl_sig_from_pk(mbedtls_pk_context *pk)
 {
+    psa_key_type_t key_type = mbedtls_pk_get_key_type(pk);
+
 #if defined(MBEDTLS_RSA_C)
-    if (mbedtls_pk_can_do(pk, MBEDTLS_PK_RSA)) {
+    if (PSA_KEY_TYPE_IS_RSA(key_type)) {
         return MBEDTLS_SSL_SIG_RSA;
     }
 #endif
 #if defined(MBEDTLS_KEY_EXCHANGE_ECDSA_CERT_REQ_ANY_ALLOWED_ENABLED)
-    if (mbedtls_pk_can_do(pk, MBEDTLS_PK_ECDSA)) {
+    if (PSA_KEY_TYPE_IS_ECC(key_type)) {
         return MBEDTLS_SSL_SIG_ECDSA;
     }
 #endif
     return MBEDTLS_SSL_SIG_ANON;
 }
 
-unsigned char mbedtls_ssl_sig_from_pk_alg(mbedtls_pk_type_t type)
+unsigned char mbedtls_ssl_sig_from_pk_alg(mbedtls_pk_sigalg_t type)
 {
     switch (type) {
-        case MBEDTLS_PK_RSA:
+        case MBEDTLS_PK_SIGALG_RSA_PKCS1V15:
             return MBEDTLS_SSL_SIG_RSA;
-        case MBEDTLS_PK_ECDSA:
-        case MBEDTLS_PK_ECKEY:
+        case MBEDTLS_PK_SIGALG_ECDSA:
             return MBEDTLS_SSL_SIG_ECDSA;
         default:
             return MBEDTLS_SSL_SIG_ANON;
     }
 }
 
-mbedtls_pk_type_t mbedtls_ssl_pk_alg_from_sig(unsigned char sig)
+mbedtls_pk_sigalg_t mbedtls_ssl_pk_sig_alg_from_sig(unsigned char sig)
 {
     switch (sig) {
 #if defined(MBEDTLS_RSA_C)
         case MBEDTLS_SSL_SIG_RSA:
-            return MBEDTLS_PK_RSA;
+            return MBEDTLS_PK_SIGALG_RSA_PKCS1V15;
 #endif
 #if defined(MBEDTLS_KEY_EXCHANGE_ECDSA_CERT_REQ_ANY_ALLOWED_ENABLED)
         case MBEDTLS_SSL_SIG_ECDSA:
-            return MBEDTLS_PK_ECDSA;
+            return MBEDTLS_PK_SIGALG_ECDSA;
 #endif
         default:
-            return MBEDTLS_PK_NONE;
+            return MBEDTLS_PK_SIGALG_NONE;
     }
 }
 #endif /* MBEDTLS_PK_C &&
@@ -5898,15 +5808,6 @@ static const struct {
 #if defined(PSA_WANT_ECC_BRAINPOOL_P_R1_256)
     { 26, MBEDTLS_ECP_DP_BP256R1, PSA_ECC_FAMILY_BRAINPOOL_P_R1, 256 },
 #endif
-#if defined(PSA_WANT_ECC_SECP_R1_224)
-    { 21, MBEDTLS_ECP_DP_SECP224R1, PSA_ECC_FAMILY_SECP_R1, 224 },
-#endif
-#if defined(PSA_WANT_ECC_SECP_R1_192)
-    { 19, MBEDTLS_ECP_DP_SECP192R1, PSA_ECC_FAMILY_SECP_R1, 192 },
-#endif
-#if defined(PSA_WANT_ECC_SECP_K1_192)
-    { 18, MBEDTLS_ECP_DP_SECP192K1, PSA_ECC_FAMILY_SECP_K1, 192 },
-#endif
 #if defined(PSA_WANT_ECC_MONTGOMERY_255)
     { 29, MBEDTLS_ECP_DP_CURVE25519, PSA_ECC_FAMILY_MONTGOMERY, 255 },
 #endif
@@ -5959,32 +5860,14 @@ uint16_t mbedtls_ssl_get_tls_id_from_ecp_group_id(mbedtls_ecp_group_id grp_id)
 }
 
 #if defined(MBEDTLS_DEBUG_C)
-static const struct {
-    uint16_t tls_id;
-    const char *name;
-} tls_id_curve_name_table[] =
-{
-    { MBEDTLS_SSL_IANA_TLS_GROUP_SECP521R1, "secp521r1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_BP512R1, "brainpoolP512r1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_SECP384R1, "secp384r1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_BP384R1, "brainpoolP384r1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_SECP256R1, "secp256r1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_SECP256K1, "secp256k1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_BP256R1, "brainpoolP256r1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_SECP224R1, "secp224r1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_SECP224K1, "secp224k1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_SECP192R1, "secp192r1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_SECP192K1, "secp192k1" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_X25519, "x25519" },
-    { MBEDTLS_SSL_IANA_TLS_GROUP_X448, "x448" },
-    { 0, NULL },
-};
+mbedtls_ssl_iana_tls_group_info_t mbedtls_ssl_iana_tls_group_info[] =
+    MBEDTLS_SSL_IANA_TLS_GROUPS_INFO;
 
 const char *mbedtls_ssl_get_curve_name_from_tls_id(uint16_t tls_id)
 {
-    for (int i = 0; tls_id_curve_name_table[i].tls_id != 0; i++) {
-        if (tls_id_curve_name_table[i].tls_id == tls_id) {
-            return tls_id_curve_name_table[i].name;
+    for (int i = 0; mbedtls_ssl_iana_tls_group_info[i].tls_id != 0; i++) {
+        if (mbedtls_ssl_iana_tls_group_info[i].tls_id == tls_id) {
+            return mbedtls_ssl_iana_tls_group_info[i].group_name;
         }
     }
 
@@ -6508,8 +6391,28 @@ static int ssl_compute_master(mbedtls_ssl_handshake_params *handshake,
                 return MBEDTLS_ERR_SSL_HW_ACCEL_FAILED;
             }
 
-            status = psa_pake_get_implicit_key(&handshake->psa_pake_ctx,
-                                               &derivation);
+            mbedtls_svc_key_id_t shared_key_id = MBEDTLS_SVC_KEY_ID_INIT;
+
+            psa_key_attributes_t shared_key_attributes = PSA_KEY_ATTRIBUTES_INIT;
+            psa_set_key_usage_flags(&shared_key_attributes, PSA_KEY_USAGE_DERIVE);
+            psa_set_key_algorithm(&shared_key_attributes, alg);
+            psa_set_key_type(&shared_key_attributes, PSA_KEY_TYPE_DERIVE);
+
+            status = psa_pake_get_shared_key(&handshake->psa_pake_ctx,
+                                             &shared_key_attributes,
+                                             &shared_key_id);
+
+            if (status != PSA_SUCCESS) {
+                psa_key_derivation_abort(&derivation);
+                return MBEDTLS_ERR_SSL_HW_ACCEL_FAILED;
+            }
+
+            status = psa_key_derivation_input_key(&derivation,
+                                                  PSA_KEY_DERIVATION_INPUT_SECRET,
+                                                  shared_key_id);
+
+            psa_destroy_key(shared_key_id);
+
             if (status != PSA_SUCCESS) {
                 psa_key_derivation_abort(&derivation);
                 return MBEDTLS_ERR_SSL_HW_ACCEL_FAILED;
@@ -6832,8 +6735,8 @@ int mbedtls_ssl_write_certificate(mbedtls_ssl_context *ssl)
 
     mbedtls_ssl_handshake_increment_state(ssl);
 
-    if ((ret = mbedtls_ssl_write_handshake_msg(ssl)) != 0) {
-        MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg", ret);
+    if ((ret = mbedtls_ssl_write_handshake_msg_ext(ssl, 1, 1)) != 0) {
+        MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg_ext", ret);
         return ret;
     }
 
@@ -7562,8 +7465,8 @@ int mbedtls_ssl_write_finished(mbedtls_ssl_context *ssl)
     }
 #endif
 
-    if ((ret = mbedtls_ssl_write_handshake_msg(ssl)) != 0) {
-        MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg", ret);
+    if ((ret = mbedtls_ssl_write_handshake_msg_ext(ssl, 1, 1)) != 0) {
+        MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg_ext", ret);
         return ret;
     }
 
@@ -8250,14 +8153,14 @@ unsigned int mbedtls_ssl_tls12_get_preferred_hash_for_sig_alg(
                     mbedtls_md_psa_alg_from_type(md_alg);
 
                 if (sig_alg_received == MBEDTLS_SSL_SIG_ECDSA &&
-                    !mbedtls_pk_can_do_ext(ssl->handshake->key_cert->key,
-                                           PSA_ALG_ECDSA(psa_hash_alg),
+                    !mbedtls_pk_can_do_psa(ssl->handshake->key_cert->key,
+                                           MBEDTLS_PK_ALG_ECDSA(psa_hash_alg),
                                            PSA_KEY_USAGE_SIGN_HASH)) {
                     continue;
                 }
 
                 if (sig_alg_received == MBEDTLS_SSL_SIG_RSA &&
-                    !mbedtls_pk_can_do_ext(ssl->handshake->key_cert->key,
+                    !mbedtls_pk_can_do_psa(ssl->handshake->key_cert->key,
                                            PSA_ALG_RSA_PKCS1V15_SIGN(
                                                psa_hash_alg),
                                            PSA_KEY_USAGE_SIGN_HASH)) {
@@ -8726,11 +8629,6 @@ int mbedtls_ssl_check_cert_usage(const mbedtls_x509_crt *cert,
                 usage = MBEDTLS_X509_KU_DIGITAL_SIGNATURE;
                 break;
 
-            case MBEDTLS_KEY_EXCHANGE_ECDH_RSA:
-            case MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA:
-                usage = MBEDTLS_X509_KU_KEY_AGREEMENT;
-                break;
-
             /* Don't use default: we want warnings when adding new values */
             case MBEDTLS_KEY_EXCHANGE_NONE:
             case MBEDTLS_KEY_EXCHANGE_PSK:
@@ -8893,7 +8791,7 @@ int mbedtls_ssl_verify_certificate(mbedtls_ssl_context *ssl,
 #if defined(MBEDTLS_SSL_PROTO_TLS1_2) && \
     defined(PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY)
     if (ssl->tls_version == MBEDTLS_SSL_VERSION_TLS1_2 &&
-        mbedtls_pk_can_do(&chain->pk, MBEDTLS_PK_ECKEY)) {
+        PSA_KEY_TYPE_IS_ECC(mbedtls_pk_get_type(&chain->pk))) {
         if (mbedtls_ssl_check_curve(ssl, mbedtls_pk_get_ec_group_id(&chain->pk)) != 0) {
             MBEDTLS_SSL_DEBUG_MSG(1, ("bad certificate (EC key curve)"));
             ssl->session_negotiate->verify_result |= MBEDTLS_X509_BADCERT_BAD_KEY;
@@ -9048,7 +8946,7 @@ static int mbedtls_ssl_tls13_export_keying_material(mbedtls_ssl_context *ssl,
                                                     const size_t context_len)
 {
     const psa_algorithm_t psa_hash_alg = mbedtls_md_psa_alg_from_type(hash_alg);
-    const size_t hash_len = PSA_HASH_LENGTH(hash_alg);
+    const size_t hash_len = PSA_HASH_LENGTH(psa_hash_alg);
     const unsigned char *secret = ssl->session->app_secrets.exporter_master_secret;
 
     /* The length of the label must be at most 249 bytes to fit into the HkdfLabel

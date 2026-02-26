@@ -123,6 +123,23 @@ int mbedtls_x509_get_alg(unsigned char **p, const unsigned char *end,
 }
 
 /*
+ * Convert the key type to a string
+ */
+const char *mbedtls_x509_pk_type_as_string(const mbedtls_pk_context *pk)
+{
+    psa_key_type_t key_type;
+
+    key_type = mbedtls_pk_get_key_type(pk);
+    if (PSA_KEY_TYPE_IS_RSA(key_type)) {
+        return "RSA";
+    } else if (PSA_KEY_TYPE_IS_ECC(key_type)) {
+        return "EC";
+    } else {
+        return "NONE";
+    }
+}
+
+/*
  * Convert md type to string
  */
 #if !defined(MBEDTLS_X509_REMOVE_INFO) && defined(MBEDTLS_X509_RSASSA_PSS_SUPPORT)
@@ -717,7 +734,7 @@ int mbedtls_x509_get_sig(unsigned char **p, const unsigned char *end, mbedtls_x5
  * Get signature algorithm from alg OID and optional parameters
  */
 int mbedtls_x509_get_sig_alg(const mbedtls_x509_buf *sig_oid, const mbedtls_x509_buf *sig_params,
-                             mbedtls_md_type_t *md_alg, mbedtls_pk_type_t *pk_alg)
+                             mbedtls_md_type_t *md_alg, mbedtls_pk_sigalg_t *pk_alg)
 {
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
 
@@ -726,7 +743,7 @@ int mbedtls_x509_get_sig_alg(const mbedtls_x509_buf *sig_oid, const mbedtls_x509
     }
 
 #if defined(MBEDTLS_X509_RSASSA_PSS_SUPPORT)
-    if (*pk_alg == MBEDTLS_PK_RSASSA_PSS) {
+    if (*pk_alg == MBEDTLS_PK_SIGALG_RSA_PSS) {
         mbedtls_md_type_t mgf1_hash_id;
         int expected_salt_len;
 
@@ -1039,7 +1056,7 @@ int mbedtls_x509_serial_gets(char *buf, size_t size, const mbedtls_x509_buf *ser
  * Helper for writing signature algorithms
  */
 int mbedtls_x509_sig_alg_gets(char *buf, size_t size, const mbedtls_x509_buf *sig_oid,
-                              mbedtls_pk_type_t pk_alg, mbedtls_md_type_t md_alg)
+                              mbedtls_pk_sigalg_t pk_alg, mbedtls_md_type_t md_alg)
 {
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
     char *p = buf;
@@ -1055,7 +1072,7 @@ int mbedtls_x509_sig_alg_gets(char *buf, size_t size, const mbedtls_x509_buf *si
     MBEDTLS_X509_SAFE_SNPRINTF;
 
 #if defined(MBEDTLS_X509_RSASSA_PSS_SUPPORT)
-    if (pk_alg == MBEDTLS_PK_RSASSA_PSS) {
+    if (pk_alg == MBEDTLS_PK_SIGALG_RSA_PSS) {
         const char *name = md_type_to_string(md_alg);
         if (name != NULL) {
             ret = mbedtls_snprintf(p, n, " (%s)", name);

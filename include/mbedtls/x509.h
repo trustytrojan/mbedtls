@@ -16,10 +16,6 @@
 #include "mbedtls/asn1.h"
 #include "mbedtls/pk.h"
 
-#if defined(MBEDTLS_RSA_C)
-#include "mbedtls/rsa.h"
-#endif
-
 /**
  * \addtogroup x509_module
  * \{
@@ -74,11 +70,11 @@
 /** Input invalid. */
 #define MBEDTLS_ERR_X509_BAD_INPUT_DATA                   -0x2800
 /** Allocation of memory failed. */
-#define MBEDTLS_ERR_X509_ALLOC_FAILED                     -0x2880
+#define MBEDTLS_ERR_X509_ALLOC_FAILED                     PSA_ERROR_INSUFFICIENT_MEMORY
 /** Read/write of file failed. */
 #define MBEDTLS_ERR_X509_FILE_IO_ERROR                    -0x2900
 /** Destination buffer is too small. */
-#define MBEDTLS_ERR_X509_BUFFER_TOO_SMALL                 -0x2980
+#define MBEDTLS_ERR_X509_BUFFER_TOO_SMALL                 PSA_ERROR_BUFFER_TOO_SMALL
 /** A fatal error occurred, eg the chain is too long or the vrfy callback failed. */
 #define MBEDTLS_ERR_X509_FATAL_ERROR                      -0x3000
 /** \} name X509 Error codes */
@@ -318,6 +314,16 @@ mbedtls_x509_san_list;
  *                 terminated nul byte), or a negative error code.
  */
 int mbedtls_x509_dn_gets(char *buf, size_t size, const mbedtls_x509_name *dn);
+
+
+/**
+ * \brief            Return the key's type as a string.
+ *
+ * \param[in] pk     A mbedtls_pk_context struct containing the pk_key_type to
+                     convert
+ * \return           Returns a string describing the key type.
+ */
+const char *mbedtls_x509_pk_type_as_string(const mbedtls_pk_context *pk);
 
 /**
  * \brief            Convert the certificate DN string \p name into

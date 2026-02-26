@@ -48,6 +48,7 @@
 
 /* System support */
 #define MBEDTLS_HAVE_ASM
+#define MBEDTLS_HAVE_TIME //Only used by test programs
 
 #define MBEDTLS_AES_ROM_TABLES
 #define MBEDTLS_ECP_NIST_OPTIM
@@ -55,7 +56,6 @@
 #define MBEDTLS_ASN1_PARSE_C
 #define MBEDTLS_ASN1_WRITE_C
 #define MBEDTLS_CTR_DRBG_C
-#define MBEDTLS_ENTROPY_C
 #define MBEDTLS_HMAC_DRBG_C
 #define MBEDTLS_MD_C
 #define MBEDTLS_PK_C

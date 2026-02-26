@@ -18,15 +18,15 @@ component_check_recursion () {
 
 component_check_generated_files () {
     msg "Check make_generated_files.py consistency"
-    make neat
-    $FRAMEWORK/scripts/make_generated_files.py
-    $FRAMEWORK/scripts/make_generated_files.py --check
-    make neat
+    $MAKE_COMMAND neat
+    scripts/make_generated_files.py
+    scripts/make_generated_files.py --check
+    $MAKE_COMMAND neat
 
     msg "Check files generated with make"
     MBEDTLS_ROOT_DIR="$PWD"
-    make generated_files
-    $FRAMEWORK/scripts/make_generated_files.py --check
+    $MAKE_COMMAND generated_files
+    scripts/make_generated_files.py --check
 
     cd $TF_PSA_CRYPTO_ROOT_DIR
     ./framework/scripts/make_generated_files.py --check
@@ -39,19 +39,17 @@ component_check_generated_files () {
     make
     cd "$MBEDTLS_ROOT_DIR"
 
-    # Files for MS Visual Studio are not generated with cmake thus copy the
-    # ones generated with make to pacify make_generated_files.py check.
-    # Files for MS Visual Studio are rather on their way out thus not adding
-    # support for them with cmake.
-    cp -Rf visualc "$OUT_OF_SOURCE_DIR"
-
-    $FRAMEWORK/scripts/make_generated_files.py --root "$OUT_OF_SOURCE_DIR" --check
+    scripts/make_generated_files.py --root "$OUT_OF_SOURCE_DIR" --check
 
     cd $TF_PSA_CRYPTO_ROOT_DIR
     ./framework/scripts/make_generated_files.py --root "$OUT_OF_SOURCE_DIR/tf-psa-crypto" --check
+    cd "$MBEDTLS_ROOT_DIR"
 
     # This component ends with the generated files present in the source tree.
     # This is necessary for subsequent components!
+
+    msg "Check committed generated files"
+    tests/scripts/check_option_lists.py
 }
 
 component_check_doxy_blocks () {

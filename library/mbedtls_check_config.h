@@ -42,10 +42,7 @@
     defined(MBEDTLS_PSA_ACCEL_ECC_BRAINPOOL_P_R1_512) || \
     defined(MBEDTLS_PSA_ACCEL_ECC_MONTGOMERY_255) || \
     defined(MBEDTLS_PSA_ACCEL_ECC_MONTGOMERY_448) || \
-    defined(MBEDTLS_PSA_ACCEL_ECC_SECP_K1_192) || \
     defined(MBEDTLS_PSA_ACCEL_ECC_SECP_K1_256) || \
-    defined(MBEDTLS_PSA_ACCEL_ECC_SECP_R1_192) || \
-    defined(MBEDTLS_PSA_ACCEL_ECC_SECP_R1_224) || \
     defined(MBEDTLS_PSA_ACCEL_ECC_SECP_R1_256) || \
     defined(MBEDTLS_PSA_ACCEL_ECC_SECP_R1_384) || \
     defined(MBEDTLS_PSA_ACCEL_ECC_SECP_R1_521)
@@ -55,19 +52,6 @@
 #endif /* modules beyond what's supported */
 #endif /* not all curves accelerated */
 #endif /* some curve accelerated */
-
-#if defined(MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED) &&                 \
-    ( !defined(MBEDTLS_CAN_ECDH) ||                                       \
-      !defined(PSA_HAVE_ALG_ECDSA_SIGN) ||                                \
-      !defined(MBEDTLS_X509_CRT_PARSE_C) )
-#error "MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED defined, but not all prerequisites"
-#endif
-
-#if defined(MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED) &&                 \
-    ( !defined(MBEDTLS_CAN_ECDH) || !defined(PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_BASIC) || \
-      !defined(MBEDTLS_X509_CRT_PARSE_C) )
-#error "MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED defined, but not all prerequisites"
-#endif
 
 #if defined(MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED) &&                     \
     !defined(MBEDTLS_CAN_ECDH)
@@ -151,18 +135,11 @@
 #if defined(MBEDTLS_SSL_PROTO_TLS1_2) &&                                    \
     !(defined(MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED) ||                    \
       defined(MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED) ||                  \
-      defined(MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED) ||                     \
-      defined(MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED) ||                   \
       defined(MBEDTLS_KEY_EXCHANGE_PSK_ENABLED) ||                          \
       defined(MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED) ||                    \
       defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED) )
 #error "One or more versions of the TLS protocol are enabled " \
         "but no key exchange methods defined with MBEDTLS_KEY_EXCHANGE_xxxx"
-#endif
-
-#if defined(MBEDTLS_SSL_PROTO_TLS1_2) && \
-    !(defined(PSA_WANT_ALG_SHA_1) || defined(PSA_WANT_ALG_SHA_256) || defined(PSA_WANT_ALG_SHA_512))
-#error "MBEDTLS_SSL_PROTO_TLS1_2 defined, but not all prerequisites"
 #endif
 
 #if defined(MBEDTLS_SSL_EARLY_DATA) && \
@@ -237,19 +214,6 @@
     MBEDTLS_SSL_CID_OUT_LEN_MAX > 255
 #error "MBEDTLS_SSL_CID_OUT_LEN_MAX too large (max 255)"
 #endif
-
-#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT)     &&                 \
-    !defined(MBEDTLS_SSL_DTLS_CONNECTION_ID)
-#error "MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT defined, but not all prerequisites"
-#endif
-
-#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT) && MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT != 0
-#if defined(MBEDTLS_DEPRECATED_REMOVED)
-#error "MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT is deprecated and will be removed in a future version of Mbed TLS"
-#elif defined(MBEDTLS_DEPRECATED_WARNING)
-#warning "MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT is deprecated and will be removed in a future version of Mbed TLS"
-#endif
-#endif /* MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT && MBEDTLS_SSL_DTLS_CONNECTION_ID_COMPAT != 0 */
 
 #if defined(MBEDTLS_SSL_ENCRYPT_THEN_MAC) &&   \
     !defined(MBEDTLS_SSL_PROTO_TLS1_2)
@@ -392,6 +356,11 @@
     ( !defined(MBEDTLS_X509_CRL_PARSE_C) ) || \
     ( !defined(MBEDTLS_MD_C) ) )
 #error  "MBEDTLS_PKCS7_C is defined, but not all prerequisites"
+#endif
+
+#if defined(MBEDTLS_TIMING_C) && \
+    !(defined(MBEDTLS_HAVE_TIME) || defined(MBEDTLS_TIMING_ALT))
+#error "MBEDTLS_TIMING_C requires either MBEDTLS_HAVE_TIME or MBEDTLS_TIMING_ALT"
 #endif
 
 /* *INDENT-ON* */

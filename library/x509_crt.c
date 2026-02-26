@@ -35,15 +35,15 @@
 #endif
 
 #include "psa/crypto.h"
-#include "psa_util_internal.h"
 #include "mbedtls/psa_util.h"
-#include "pk_internal.h"
 
 #include "mbedtls/platform.h"
 
 #if defined(MBEDTLS_THREADING_C)
 #include "mbedtls/threading.h"
 #endif
+
+#include "mbedtls_utils.h"
 
 #if defined(MBEDTLS_HAVE_TIME)
 #if defined(_WIN32) && !defined(EFIX64) && !defined(EFI32)
@@ -188,9 +188,9 @@ static int x509_profile_check_md_alg(const mbedtls_x509_crt_profile *profile,
  * Return 0 if pk_alg is acceptable for this profile, -1 otherwise
  */
 static int x509_profile_check_pk_alg(const mbedtls_x509_crt_profile *profile,
-                                     mbedtls_pk_type_t pk_alg)
+                                     mbedtls_pk_sigalg_t pk_alg)
 {
-    if (pk_alg == MBEDTLS_PK_NONE) {
+    if (pk_alg == MBEDTLS_PK_SIGALG_NONE) {
         return -1;
     }
 
@@ -1806,7 +1806,7 @@ int mbedtls_x509_crt_info(char *buf, size_t size, const char *prefix,
 
     /* Key size */
     if ((ret = mbedtls_x509_key_size_helper(key_size_str, MBEDTLS_BEFORE_COLON,
-                                            mbedtls_pk_get_name(&crt->pk))) != 0) {
+                                            mbedtls_x509_pk_type_as_string(&crt->pk))) != 0) {
         return ret;
     }
 
@@ -2061,7 +2061,7 @@ static int x509_crt_verifycrl(mbedtls_x509_crt *crt, mbedtls_x509_crt *ca,
             flags |= MBEDTLS_X509_BADCERT_BAD_KEY;
         }
 
-        if (mbedtls_pk_verify_new(crl_list->sig_pk, &ca->pk,
+        if (mbedtls_pk_verify_ext(crl_list->sig_pk, &ca->pk,
                                   crl_list->sig_md, hash, hash_length,
                                   crl_list->sig.p, crl_list->sig.len) != 0) {
             flags |= MBEDTLS_X509_BADCRL_NOT_TRUSTED;
@@ -2110,6 +2110,13 @@ static int x509_crt_check_signature(const mbedtls_x509_crt *child,
     psa_algorithm_t hash_alg = mbedtls_md_psa_alg_from_type(child->sig_md);
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
 
+    /* Skip expensive computation on obvious mismatch */
+    if (!mbedtls_pk_can_do_psa(&parent->pk,
+                               mbedtls_psa_alg_from_pk_sigalg(child->sig_pk, hash_alg),
+                               PSA_KEY_USAGE_VERIFY_HASH)) {
+        return -1;
+    }
+
     status = psa_hash_compute(hash_alg,
                               child->tbs.p,
                               child->tbs.len,
@@ -2120,13 +2127,8 @@ static int x509_crt_check_signature(const mbedtls_x509_crt *child,
         return MBEDTLS_ERR_PLATFORM_HW_ACCEL_FAILED;
     }
 
-    /* Skip expensive computation on obvious mismatch */
-    if (!mbedtls_pk_can_do(&parent->pk, child->sig_pk)) {
-        return -1;
-    }
-
 #if defined(MBEDTLS_ECP_RESTARTABLE)
-    if (rs_ctx != NULL && child->sig_pk == MBEDTLS_PK_ECDSA) {
+    if (rs_ctx != NULL && child->sig_pk == MBEDTLS_PK_SIGALG_ECDSA) {
         return mbedtls_pk_verify_restartable(&parent->pk,
                                              child->sig_md, hash, hash_len,
                                              child->sig.p, child->sig.len, &rs_ctx->pk);
@@ -2135,7 +2137,7 @@ static int x509_crt_check_signature(const mbedtls_x509_crt *child,
     (void) rs_ctx;
 #endif
 
-    return mbedtls_pk_verify_new(child->sig_pk, &parent->pk,
+    return mbedtls_pk_verify_ext(child->sig_pk, &parent->pk,
                                  child->sig_md, hash, hash_len,
                                  child->sig.p, child->sig.len);
 }
@@ -3057,7 +3059,7 @@ static int x509_crt_verify_restartable_ca_cb(mbedtls_x509_crt *crt,
     /* Check the type and size of the key */
     pk_type = mbedtls_pk_get_type(&crt->pk);
 
-    if (x509_profile_check_pk_alg(profile, pk_type) != 0) {
+    if (x509_profile_check_pk_alg(profile, (mbedtls_pk_sigalg_t) pk_type) != 0) {
         ee_flags |= MBEDTLS_X509_BADCERT_BAD_PK;
     }
 

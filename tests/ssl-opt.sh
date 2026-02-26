@@ -312,12 +312,7 @@ requires_any_configs_disabled() {
 }
 
 TLS1_2_KEY_EXCHANGES_WITH_CERT="MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED \
-                                MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED \
-                                MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED \
-                                MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED"
-
-TLS1_2_KEY_EXCHANGES_WITH_ECDSA_CERT="MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED \
-                                      MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED"
+                                MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED"
 
 TLS1_2_KEY_EXCHANGES_WITH_CERT_WO_ECDH="MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED \
                                         MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED"
@@ -436,14 +431,12 @@ requires_cipher_enabled() {
 # - $1 = command line (call to a TLS client or server program)
 # - $2 = client/server
 # - $3 = TLS version (TLS12 or TLS13)
-# - $4 = Use an external tool without ECDH support
-# - $5 = run test options
+# - $4 = run test options
 detect_required_features() {
     CMD_LINE=$1
     ROLE=$2
     TLS_VERSION=$3
-    EXT_WO_ECDH=$4
-    TEST_OPTIONS=${5:-}
+    TEST_OPTIONS=${4:-}
 
     case "$CMD_LINE" in
         *\ force_version=*)
@@ -484,7 +477,8 @@ detect_required_features() {
         *"programs/ssl/dtls_client "*|\
         *"programs/ssl/ssl_client1 "*)
             requires_config_enabled MBEDTLS_CTR_DRBG_C
-            requires_config_enabled MBEDTLS_ENTROPY_C
+            requires_config_enabled MBEDTLS_PSA_CRYPTO_C
+            requires_config_disabled MBEDTLS_PSA_CRYPTO_EXTERNAL_RNG
             requires_config_enabled MBEDTLS_PEM_PARSE_C
             requires_config_enabled MBEDTLS_SSL_CLI_C
             requires_certificate_authentication
@@ -494,7 +488,8 @@ detect_required_features() {
         *"programs/ssl/ssl_pthread_server "*|\
         *"programs/ssl/ssl_server "*)
             requires_config_enabled MBEDTLS_CTR_DRBG_C
-            requires_config_enabled MBEDTLS_ENTROPY_C
+            requires_config_enabled MBEDTLS_PSA_CRYPTO_C
+            requires_config_disabled MBEDTLS_PSA_CRYPTO_EXTERNAL_RNG
             requires_config_enabled MBEDTLS_PEM_PARSE_C
             requires_config_enabled MBEDTLS_SSL_SRV_C
             requires_certificate_authentication
@@ -523,24 +518,9 @@ detect_required_features() {
             else
                 # For TLS12 requirements are different between server and client
                 if [ "$ROLE" = "server" ]; then
-                    # If the server uses "server5*" certificates, then an ECDSA based
-                    # key exchange is required. However gnutls also does not
-                    # support ECDH, so this limit the choice to ECDHE-ECDSA
-                    if [ "$EXT_WO_ECDH" = "yes" ]; then
-                        requires_any_configs_enabled MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
-                    else
-                        requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_ECDSA_CERT
-                    fi
+                    requires_any_configs_enabled MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
                 elif [ "$ROLE" = "client" ]; then
-                    # On the client side it is enough to have any certificate
-                    # based authentication together with support for ECDSA.
-                    # Of course the GnuTLS limitation mentioned above applies
-                    # also here.
-                    if [ "$EXT_WO_ECDH" = "yes" ]; then
-                        requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_CERT_WO_ECDH
-                    else
-                        requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_CERT
-                    fi
+                    requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_CERT_WO_ECDH
                     requires_pk_alg "ECDSA"
                 fi
             fi
@@ -1303,28 +1283,6 @@ is_gnutls() {
     esac
 }
 
-# Some external tools (gnutls or openssl) might not have support for static ECDH
-# and this limit the tests that can be run with them. This function checks server
-# and client command lines, given as input, to verify if the current test
-# is using one of these tools.
-use_ext_tool_without_ecdh_support() {
-    case "$1" in
-        *$GNUTLS_SERV*|\
-        *${GNUTLS_NEXT_SERV:-"gnutls-serv-dummy"}*|\
-        *${OPENSSL_NEXT:-"openssl-dummy"}*)
-                echo "yes"
-                return;;
-    esac
-    case "$2" in
-        *$GNUTLS_CLI*|\
-        *${GNUTLS_NEXT_CLI:-"gnutls-cli-dummy"}*|\
-        *${OPENSSL_NEXT:-"openssl-dummy"}*)
-                echo "yes"
-                return;;
-    esac
-    echo "no"
-}
-
 # Generate random psk_list argument for ssl_server2
 get_srv_psk_list ()
 {
@@ -1811,26 +1769,20 @@ run_test() {
         requires_config_enabled MBEDTLS_SSL_PROTO_DTLS
     fi
 
-    # Check if we are trying to use an external tool which does not support ECDH
-    EXT_WO_ECDH=$(use_ext_tool_without_ecdh_support "$SRV_CMD" "$CLI_CMD")
 
     # Guess the TLS version which is going to be used.
     # Note that this detection is wrong in some cases, which causes unduly
     # skipped test cases in builds with TLS 1.3 but not TLS 1.2.
     # https://github.com/Mbed-TLS/mbedtls/issues/9560
-    if [ "$EXT_WO_ECDH" = "no" ]; then
-        TLS_VERSION=$(get_tls_version "$SRV_CMD" "$CLI_CMD")
-    else
-        TLS_VERSION="TLS12"
-    fi
+    TLS_VERSION=$(get_tls_version "$SRV_CMD" "$CLI_CMD")
 
     # If we're in a PSK-only build and the test can be adapted to PSK, do that.
     maybe_adapt_for_psk "$@"
 
     # If the client or server requires certain features that can be detected
     # from their command-line arguments, check whether they're enabled.
-    detect_required_features "$SRV_CMD" "server" "$TLS_VERSION" "$EXT_WO_ECDH" "$@"
-    detect_required_features "$CLI_CMD" "client" "$TLS_VERSION" "$EXT_WO_ECDH" "$@"
+    detect_required_features "$SRV_CMD" "server" "$TLS_VERSION" "$@"
+    detect_required_features "$CLI_CMD" "client" "$TLS_VERSION" "$@"
 
     # should we skip?
     if [ "X$SKIP_NEXT" = "XYES" ]; then
@@ -2314,7 +2266,7 @@ run_test    "Opaque key for client authentication: ECDHE-ECDSA" \
             "$P_CLI key_opaque=1 crt_file=$DATA_FILES_PATH/server5.crt \
              key_file=$DATA_FILES_PATH/server5.key key_opaque_algs=ecdsa-sign,none" \
             0 \
-            -c "key type: Opaque" \
+            -c "key type: EC" \
             -c "Ciphersuite is TLS-ECDHE-ECDSA" \
             -s "Verifying peer X.509 certificate... ok" \
             -s "Ciphersuite is TLS-ECDHE-ECDSA" \
@@ -2332,7 +2284,7 @@ run_test    "Opaque key for client authentication: ECDHE-RSA" \
             "$P_CLI key_opaque=1 crt_file=$DATA_FILES_PATH/server2-sha256.crt \
              key_file=$DATA_FILES_PATH/server2.key key_opaque_algs=rsa-sign-pkcs1,none" \
             0 \
-            -c "key type: Opaque" \
+            -c "key type: RSA" \
             -c "Ciphersuite is TLS-ECDHE-RSA" \
             -s "Verifying peer X.509 certificate... ok" \
             -s "Ciphersuite is TLS-ECDHE-RSA" \
@@ -2350,56 +2302,10 @@ run_test    "Opaque key for server authentication: ECDHE-ECDSA" \
             0 \
             -c "Verifying peer X.509 certificate... ok" \
             -c "Ciphersuite is TLS-ECDHE-ECDSA" \
-            -s "key types: Opaque, none" \
+            -s "key types: EC, none" \
             -s "Ciphersuite is TLS-ECDHE-ECDSA" \
             -S "error" \
             -C "error"
-
-requires_config_enabled MBEDTLS_X509_CRT_PARSE_C
-requires_hash_alg SHA_256
-run_test    "Opaque key for server authentication: ECDH-" \
-            "$P_SRV auth_mode=required key_opaque=1\
-             crt_file=$DATA_FILES_PATH/server5.ku-ka.crt\
-             key_file=$DATA_FILES_PATH/server5.key key_opaque_algs=ecdh,none" \
-            "$P_CLI force_version=tls12" \
-            0 \
-            -c "Verifying peer X.509 certificate... ok" \
-            -c "Ciphersuite is TLS-ECDH-" \
-            -s "key types: Opaque, none" \
-            -s "Ciphersuite is TLS-ECDH-" \
-            -S "error" \
-            -C "error"
-
-requires_config_enabled MBEDTLS_X509_CRT_PARSE_C
-requires_config_enabled MBEDTLS_ECDSA_C
-requires_config_enabled PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_BASIC
-requires_config_disabled MBEDTLS_SSL_ASYNC_PRIVATE
-requires_hash_alg SHA_256
-run_test    "Opaque key for server authentication: invalid key: ecdh with RSA key, no async" \
-            "$P_SRV key_opaque=1 crt_file=$DATA_FILES_PATH/server2-sha256.crt \
-             key_file=$DATA_FILES_PATH/server2.key key_opaque_algs=ecdh,none \
-             debug_level=1" \
-            "$P_CLI force_version=tls12" \
-            1 \
-            -s "key types: Opaque, none" \
-            -s "error" \
-            -c "error" \
-            -c "Public key type mismatch"
-
-requires_config_enabled MBEDTLS_X509_CRT_PARSE_C
-requires_config_enabled PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_BASIC
-requires_config_enabled MBEDTLS_SSL_ASYNC_PRIVATE
-requires_hash_alg SHA_256
-run_test    "Opaque key for server authentication: invalid alg: ecdh with RSA key, async" \
-            "$P_SRV key_opaque=1 crt_file=$DATA_FILES_PATH/server2-sha256.crt \
-             key_file=$DATA_FILES_PATH/server2.key key_opaque_algs=ecdh,none \
-             debug_level=1" \
-            "$P_CLI force_version=tls12" \
-            1 \
-            -s "key types: Opaque, none" \
-            -s "got ciphersuites in common, but none of them usable" \
-            -s "error" \
-            -c "error"
 
 requires_config_enabled MBEDTLS_X509_CRT_PARSE_C
 requires_hash_alg SHA_256
@@ -2409,7 +2315,7 @@ run_test    "Opaque key for server authentication: invalid alg: ECDHE-ECDSA with
              debug_level=1" \
             "$P_CLI force_version=tls12 force_ciphersuite=TLS-ECDHE-ECDSA-WITH-AES-256-CCM" \
             1 \
-            -s "key types: Opaque, none" \
+            -s "key types: EC, none" \
             -s "got ciphersuites in common, but none of them usable" \
             -s "error" \
             -c "error"
@@ -2428,26 +2334,8 @@ run_test    "Opaque keys for server authentication: EC keys with different algs,
             -c "Verifying peer X.509 certificate... ok" \
             -c "Ciphersuite is TLS-ECDHE-ECDSA" \
             -c "CN=Polarssl Test EC CA" \
-            -s "key types: Opaque, Opaque" \
+            -s "key types: EC, EC" \
             -s "Ciphersuite is TLS-ECDHE-ECDSA" \
-            -S "error" \
-            -C "error"
-
-requires_config_enabled MBEDTLS_X509_CRT_PARSE_C
-requires_hash_alg SHA_384
-requires_config_disabled MBEDTLS_X509_REMOVE_INFO
-run_test    "Opaque keys for server authentication: EC keys with different algs, force ECDH-ECDSA" \
-            "$P_SRV key_opaque=1 crt_file=$DATA_FILES_PATH/server7.crt \
-             key_file=$DATA_FILES_PATH/server7.key key_opaque_algs=ecdsa-sign,none \
-             crt_file2=$DATA_FILES_PATH/server5.crt key_file2=$DATA_FILES_PATH/server5.key \
-             key_opaque_algs2=ecdh,none debug_level=3" \
-            "$P_CLI force_version=tls12 force_ciphersuite=TLS-ECDH-ECDSA-WITH-CAMELLIA-256-CBC-SHA384" \
-            0 \
-            -c "Verifying peer X.509 certificate... ok" \
-            -c "Ciphersuite is TLS-ECDH-ECDSA" \
-            -c "CN=Polarssl Test EC CA" \
-            -s "key types: Opaque, Opaque" \
-            -s "Ciphersuite is TLS-ECDH-ECDSA" \
             -S "error" \
             -C "error"
 
@@ -2464,7 +2352,7 @@ run_test    "Opaque keys for server authentication: EC + RSA, force ECDHE-ECDSA"
             -c "Verifying peer X.509 certificate... ok" \
             -c "Ciphersuite is TLS-ECDHE-ECDSA" \
             -c "CN=Polarssl Test EC CA" \
-            -s "key types: Opaque, Opaque" \
+            -s "key types: EC, RSA" \
             -s "Ciphersuite is TLS-ECDHE-ECDSA" \
             -S "error" \
             -C "error"
@@ -2477,8 +2365,8 @@ run_test    "TLS 1.3 opaque key: no suitable algorithm found" \
             "$P_SRV debug_level=4 auth_mode=required key_opaque=1 key_opaque_algs=rsa-sign-pkcs1,none" \
             "$P_CLI debug_level=4 key_opaque=1 key_opaque_algs=rsa-sign-pkcs1,rsa-sign-pss" \
             1 \
-            -c "key type: Opaque" \
-            -s "key types: Opaque, Opaque" \
+            -c "key type: RSA" \
+            -s "key types: RSA, EC" \
             -c "error" \
             -s "no suitable signature algorithm"
 
@@ -2490,8 +2378,8 @@ run_test    "TLS 1.3 opaque key: suitable algorithm found" \
             "$P_SRV debug_level=4 auth_mode=required key_opaque=1 key_opaque_algs=rsa-sign-pkcs1,rsa-sign-pss" \
             "$P_CLI debug_level=4 key_opaque=1 key_opaque_algs=rsa-sign-pkcs1,rsa-sign-pss" \
             0 \
-            -c "key type: Opaque" \
-            -s "key types: Opaque, Opaque" \
+            -c "key type: RSA" \
+            -s "key types: RSA, EC" \
             -C "error" \
             -S "error"
 
@@ -2503,7 +2391,7 @@ run_test    "TLS 1.3 opaque key: first client sig alg not suitable" \
             "$P_SRV debug_level=4 auth_mode=required key_opaque=1 key_opaque_algs=rsa-sign-pss-sha512,none" \
             "$P_CLI debug_level=4 sig_algs=rsa_pss_rsae_sha256,rsa_pss_rsae_sha512" \
             0 \
-            -s "key types: Opaque, Opaque" \
+            -s "key types: RSA, EC" \
             -s "CertificateVerify signature failed with rsa_pss_rsae_sha256" \
             -s "CertificateVerify signature with rsa_pss_rsae_sha512" \
             -C "error" \
@@ -2517,8 +2405,8 @@ run_test    "TLS 1.3 opaque key: 2 keys on server, suitable algorithm found" \
             "$P_SRV debug_level=4 auth_mode=required key_opaque=1 key_opaque_algs2=ecdsa-sign,none key_opaque_algs=rsa-sign-pkcs1,rsa-sign-pss" \
             "$P_CLI debug_level=4 key_opaque=1 key_opaque_algs=rsa-sign-pkcs1,rsa-sign-pss" \
             0 \
-            -c "key type: Opaque" \
-            -s "key types: Opaque, Opaque" \
+            -c "key type: RSA" \
+            -s "key types: RSA, EC" \
             -C "error" \
             -S "error" \
 
@@ -2534,7 +2422,7 @@ run_test    "Opaque key for server authentication: ECDHE-RSA" \
             0 \
             -c "Verifying peer X.509 certificate... ok" \
             -c "Ciphersuite is TLS-ECDHE-RSA" \
-            -s "key types: Opaque, none" \
+            -s "key types: RSA, none" \
             -s "Ciphersuite is TLS-ECDHE-RSA" \
             -S "error" \
             -C "error"
@@ -2549,7 +2437,7 @@ run_test    "Opaque key for server authentication: ECDHE-RSA, PSS instead of PKC
             "$P_CLI crt_file=$DATA_FILES_PATH/server2-sha256.crt \
              key_file=$DATA_FILES_PATH/server2.key force_ciphersuite=TLS-ECDHE-RSA-WITH-AES-128-CBC-SHA" \
             1 \
-            -s "key types: Opaque, none" \
+            -s "key types: RSA, none" \
             -s "got ciphersuites in common, but none of them usable" \
             -s "error" \
             -c "error"
@@ -2569,7 +2457,7 @@ run_test    "Opaque keys for server authentication: RSA keys with different algs
             -c "Verifying peer X.509 certificate... ok" \
             -c "Ciphersuite is TLS-ECDHE-RSA" \
             -c "CN=Polarssl Test EC CA" \
-            -s "key types: Opaque, Opaque" \
+            -s "key types: RSA, RSA" \
             -s "Ciphersuite is TLS-ECDHE-RSA" \
             -S "error" \
             -C "error"
@@ -2589,7 +2477,7 @@ run_test    "Opaque keys for server authentication: EC + RSA, force ECDHE-RSA" \
             -c "Verifying peer X.509 certificate... ok" \
             -c "Ciphersuite is TLS-ECDHE-RSA" \
             -c "CN=Polarssl Test EC CA" \
-            -s "key types: Opaque, Opaque" \
+            -s "key types: EC, RSA" \
             -s "Ciphersuite is TLS-ECDHE-RSA" \
             -S "error" \
             -C "error"
@@ -2604,10 +2492,10 @@ run_test    "Opaque key for client/server authentication: ECDHE-ECDSA" \
             "$P_CLI key_opaque=1 crt_file=$DATA_FILES_PATH/server5.crt \
              key_file=$DATA_FILES_PATH/server5.key key_opaque_algs=ecdsa-sign,none" \
             0 \
-            -c "key type: Opaque" \
+            -c "key type: EC" \
             -c "Verifying peer X.509 certificate... ok" \
             -c "Ciphersuite is TLS-ECDHE-ECDSA" \
-            -s "key types: Opaque, none" \
+            -s "key types: EC, none" \
             -s "Verifying peer X.509 certificate... ok" \
             -s "Ciphersuite is TLS-ECDHE-ECDSA" \
             -S "error" \
@@ -2624,10 +2512,10 @@ run_test    "Opaque key for client/server authentication: ECDHE-RSA" \
             "$P_CLI force_version=tls12 key_opaque=1 crt_file=$DATA_FILES_PATH/server2-sha256.crt \
              key_file=$DATA_FILES_PATH/server2.key  key_opaque_algs=rsa-sign-pkcs1,none" \
             0 \
-            -c "key type: Opaque" \
+            -c "key type: RSA" \
             -c "Verifying peer X.509 certificate... ok" \
             -c "Ciphersuite is TLS-ECDHE-RSA" \
-            -s "key types: Opaque, none" \
+            -s "key types: RSA, none" \
             -s "Verifying peer X.509 certificate... ok" \
             -s "Ciphersuite is TLS-ECDHE-RSA" \
             -S "error" \
@@ -2659,12 +2547,6 @@ requires_config_enabled PSA_WANT_ECC_SECP_K1_256
 run_test_psa_force_curve "secp256k1"
 requires_config_enabled PSA_WANT_ECC_BRAINPOOL_P_R1_256
 run_test_psa_force_curve "brainpoolP256r1"
-requires_config_enabled PSA_WANT_ECC_SECP_R1_224
-run_test_psa_force_curve "secp224r1"
-requires_config_enabled PSA_WANT_ECC_SECP_R1_192
-run_test_psa_force_curve "secp192r1"
-requires_config_enabled PSA_WANT_ECC_SECP_K1_192
-run_test_psa_force_curve "secp192k1"
 
 # Test current time in ServerHello
 requires_config_enabled MBEDTLS_HAVE_TIME
@@ -6183,31 +6065,6 @@ run_test "Authentication: hostname unset, client default, server picks PSK, 1.3"
          -C "x509_verify_cert() returned -" \
          -C "X509 - Certificate verification failed"
 
-# The purpose of the next two tests is to test the client's behaviour when receiving a server
-# certificate with an unsupported elliptic curve. This should usually not happen because
-# the client informs the server about the supported curves - it does, though, in the
-# corner case of a static ECDH suite, because the server doesn't check the curve on that
-# occasion (to be fixed). If that bug's fixed, the test needs to be altered to use a
-# different means to have the server ignoring the client's supported curve list.
-
-run_test    "Authentication: server ECDH p256v1, client required, p256v1 unsupported" \
-            "$P_SRV debug_level=1 key_file=$DATA_FILES_PATH/server5.key \
-             crt_file=$DATA_FILES_PATH/server5.ku-ka.crt" \
-            "$P_CLI force_version=tls12 debug_level=3 auth_mode=required groups=secp521r1" \
-            1 \
-            -c "bad certificate (EC key curve)"\
-            -c "! Certificate verification flags"\
-            -C "bad server certificate (ECDH curve)" # Expect failure at earlier verification stage
-
-run_test    "Authentication: server ECDH p256v1, client optional, p256v1 unsupported" \
-            "$P_SRV debug_level=1 key_file=$DATA_FILES_PATH/server5.key \
-             crt_file=$DATA_FILES_PATH/server5.ku-ka.crt" \
-            "$P_CLI force_version=tls12 debug_level=3 auth_mode=optional groups=secp521r1" \
-            1 \
-            -c "bad certificate (EC key curve)"\
-            -c "! Certificate verification flags"\
-            -c "bad server certificate (ECDH curve)" # Expect failure only at ECDH params check
-
 requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_CERT
 run_test    "Authentication: client SHA256, server required" \
             "$P_SRV auth_mode=required" \
@@ -6559,33 +6416,6 @@ run_test    "Authentication, CA callback: server badcert, client none" \
             -C "! The certificate is not correctly signed by the trusted CA" \
             -C "! mbedtls_ssl_handshake returned" \
             -C "X509 - Certificate verification failed"
-
-# The purpose of the next two tests is to test the client's behaviour when receiving a server
-# certificate with an unsupported elliptic curve. This should usually not happen because
-# the client informs the server about the supported curves - it does, though, in the
-# corner case of a static ECDH suite, because the server doesn't check the curve on that
-# occasion (to be fixed). If that bug's fixed, the test needs to be altered to use a
-# different means to have the server ignoring the client's supported curve list.
-
-run_test    "Authentication, CA callback: server ECDH p256v1, client required, p256v1 unsupported" \
-            "$P_SRV debug_level=1 key_file=$DATA_FILES_PATH/server5.key \
-             crt_file=$DATA_FILES_PATH/server5.ku-ka.crt" \
-            "$P_CLI force_version=tls12 ca_callback=1 debug_level=3 auth_mode=required groups=secp521r1" \
-            1 \
-            -c "use CA callback for X.509 CRT verification" \
-            -c "bad certificate (EC key curve)" \
-            -c "! Certificate verification flags" \
-            -C "bad server certificate (ECDH curve)" # Expect failure at earlier verification stage
-
-run_test    "Authentication, CA callback: server ECDH p256v1, client optional, p256v1 unsupported" \
-            "$P_SRV debug_level=1 key_file=$DATA_FILES_PATH/server5.key \
-             crt_file=$DATA_FILES_PATH/server5.ku-ka.crt" \
-            "$P_CLI force_version=tls12 ca_callback=1 debug_level=3 auth_mode=optional groups=secp521r1" \
-            1 \
-            -c "use CA callback for X.509 CRT verification" \
-            -c "bad certificate (EC key curve)"\
-            -c "! Certificate verification flags"\
-            -c "bad server certificate (ECDH curve)" # Expect failure only at ECDH params check
 
 requires_any_configs_enabled $TLS1_2_KEY_EXCHANGES_WITH_CERT
 run_test    "Authentication, CA callback: client SHA384, server required" \
@@ -7990,14 +7820,6 @@ run_test    "keyUsage srv 1.2: ECC, digitalSignature -> ECDHE-ECDSA" \
             "$P_CLI" \
             0 \
             -c "Ciphersuite is TLS-ECDHE-ECDSA-WITH-"
-
-
-run_test    "keyUsage srv 1.2: ECC, keyAgreement -> ECDH-" \
-            "$P_SRV force_version=tls12 key_file=$DATA_FILES_PATH/server5.key \
-             crt_file=$DATA_FILES_PATH/server5.ku-ka.crt" \
-            "$P_CLI" \
-            0 \
-            -c "Ciphersuite is TLS-ECDH-"
 
 run_test    "keyUsage srv 1.2: ECC, keyEncipherment -> fail" \
             "$P_SRV force_version=tls12 key_file=$DATA_FILES_PATH/server5.key \
@@ -9445,12 +9267,12 @@ run_test    "EC restart: TLS, max_ops=65535" \
 
 # The following test cases for restartable ECDH come in two variants:
 # * The "(USE_PSA)" variant expects the current behavior, which is the behavior
-#   from Mbed TLS 3.x when MBEDTLS_USE_PSA_CRYPTO is disabled. This tests
+#   from Mbed TLS 3.x when MBEDTLS_USE_PSA_CRYPTO is enabled. This tests
 #   the partial implementation where ECDH in TLS is not actually restartable.
 # * The "(no USE_PSA)" variant expects the desired behavior. These test
 #   cases cannot currently pass because the implementation of restartable ECC
 #   in TLS is partial: ECDH is not actually restartable. This is the behavior
-#   from Mbed TLS 3.x when MBEDTLS_USE_PSA_CRYPTO is enabled.
+#   from Mbed TLS 3.x when MBEDTLS_USE_PSA_CRYPTO is disabled.
 #
 # As part of resolving https://github.com/Mbed-TLS/mbedtls/issues/7294,
 # we will remove the "(USE_PSA)" test cases and run the "(no USE_PSA)" test
@@ -10092,6 +9914,7 @@ run_test    "DTLS reassembly: some fragmentation (gnutls server)" \
             "$P_CLI dtls=1 debug_level=2" \
             0 \
             -c "found fragmented DTLS handshake message" \
+            -c "Certificate handshake message has been buffered and reassembled" \
             -C "error"
 
 requires_gnutls
@@ -10101,6 +9924,8 @@ run_test    "DTLS reassembly: more fragmentation (gnutls server)" \
             "$P_CLI dtls=1 debug_level=2" \
             0 \
             -c "found fragmented DTLS handshake message" \
+            -c "Certificate handshake message has been buffered and reassembled" \
+            -c "ServerKeyExchange handshake message has been buffered and reassembled" \
             -C "error"
 
 requires_gnutls
@@ -10110,6 +9935,8 @@ run_test    "DTLS reassembly: more fragmentation, nbio (gnutls server)" \
             "$P_CLI dtls=1 nbio=2 debug_level=2" \
             0 \
             -c "found fragmented DTLS handshake message" \
+            -c "Certificate handshake message has been buffered and reassembled" \
+            -c "ServerKeyExchange handshake message has been buffered and reassembled" \
             -C "error"
 
 requires_gnutls
@@ -10120,6 +9947,7 @@ run_test    "DTLS reassembly: fragmentation, renego (gnutls server)" \
             "$P_CLI debug_level=3 dtls=1 renegotiation=1 renegotiate=1" \
             0 \
             -c "found fragmented DTLS handshake message" \
+            -c "Certificate handshake message has been buffered and reassembled" \
             -c "client hello, adding renegotiation extension" \
             -c "found renegotiation extension" \
             -c "=> renegotiate" \
@@ -10135,6 +9963,7 @@ run_test    "DTLS reassembly: fragmentation, nbio, renego (gnutls server)" \
             "$P_CLI debug_level=3 nbio=2 dtls=1 renegotiation=1 renegotiate=1" \
             0 \
             -c "found fragmented DTLS handshake message" \
+            -c "Certificate handshake message has been buffered and reassembled" \
             -c "client hello, adding renegotiation extension" \
             -c "found renegotiation extension" \
             -c "=> renegotiate" \
@@ -10150,20 +9979,17 @@ run_test    "DTLS reassembly: no fragmentation (openssl server)" \
             -C "found fragmented DTLS handshake message" \
             -C "error"
 
+# Minimum possible MTU for OpenSSL server: 256 bytes.
+# We expect the server Certificate handshake to be fragmented and verify that
+# this is the case. Depending on the configuration, other handshake messages may
+# also be fragmented.
 requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
-run_test    "DTLS reassembly: some fragmentation (openssl server)" \
+run_test    "DTLS reassembly: fragmentation (openssl server)" \
             "$O_SRV -dtls -mtu 256" \
             "$P_CLI dtls=1 debug_level=2" \
             0 \
             -c "found fragmented DTLS handshake message" \
-            -C "error"
-
-requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
-run_test    "DTLS reassembly: more fragmentation (openssl server)" \
-            "$O_SRV -dtls -mtu 256" \
-            "$P_CLI dtls=1 debug_level=2" \
-            0 \
-            -c "found fragmented DTLS handshake message" \
+            -c "Certificate handshake message has been buffered and reassembled" \
             -C "error"
 
 requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
@@ -10172,6 +9998,7 @@ run_test    "DTLS reassembly: fragmentation, nbio (openssl server)" \
             "$P_CLI dtls=1 nbio=2 debug_level=2" \
             0 \
             -c "found fragmented DTLS handshake message" \
+            -c "Certificate handshake message has been buffered and reassembled" \
             -C "error"
 
 # Tests for sending fragmented handshake messages with DTLS
@@ -10840,7 +10667,7 @@ run_test    "DTLS fragmenting: gnutls server, DTLS 1.2" \
              key_file=$DATA_FILES_PATH/server8.key \
              mtu=512 force_version=dtls12" \
             0 \
-            -c "fragmenting handshake message" \
+            -c "fragmenting Certificate handshake message" \
             -C "error"
 
 # We use --insecure for the GnuTLS client because it expects
@@ -10862,7 +10689,7 @@ run_test    "DTLS fragmenting: gnutls client, DTLS 1.2" \
              mtu=512 force_version=dtls12" \
             "$G_CLI -u --insecure 127.0.0.1" \
             0 \
-            -s "fragmenting handshake message"
+            -s "fragmenting Certificate handshake message"
 
 requires_config_enabled MBEDTLS_SSL_PROTO_DTLS
 requires_config_enabled PSA_WANT_KEY_TYPE_RSA_KEY_PAIR_BASIC
@@ -10874,7 +10701,7 @@ run_test    "DTLS fragmenting: openssl server, DTLS 1.2" \
              key_file=$DATA_FILES_PATH/server8.key \
              mtu=512 force_version=dtls12" \
             0 \
-            -c "fragmenting handshake message" \
+            -c "fragmenting Certificate handshake message" \
             -C "error"
 
 requires_config_enabled MBEDTLS_SSL_PROTO_DTLS
@@ -10887,7 +10714,7 @@ run_test    "DTLS fragmenting: openssl client, DTLS 1.2" \
              mtu=512 force_version=dtls12" \
             "$O_CLI -dtls1_2" \
             0 \
-            -s "fragmenting handshake message"
+            -s "fragmenting Certificate handshake message"
 
 # interop tests for DTLS fragmentating with unreliable connection
 #
@@ -10906,7 +10733,7 @@ run_test    "DTLS fragmenting: 3d, gnutls server, DTLS 1.2" \
              key_file=$DATA_FILES_PATH/server8.key \
              hs_timeout=250-60000 mtu=512 force_version=dtls12" \
             0 \
-            -c "fragmenting handshake message" \
+            -c "fragmenting Certificate handshake message" \
             -C "error"
 
 requires_gnutls_next
@@ -10922,7 +10749,7 @@ run_test    "DTLS fragmenting: 3d, gnutls client, DTLS 1.2" \
              hs_timeout=250-60000 mtu=512 force_version=dtls12" \
            "$G_NEXT_CLI -u --insecure 127.0.0.1" \
             0 \
-            -s "fragmenting handshake message"
+            -s "fragmenting Certificate handshake message"
 
 ## The test below requires 1.1.1a or higher version of openssl, otherwise
 ## it might trigger a bug due to openssl server (https://github.com/openssl/openssl/issues/6902)
@@ -10939,7 +10766,7 @@ run_test    "DTLS fragmenting: 3d, openssl server, DTLS 1.2" \
              key_file=$DATA_FILES_PATH/server8.key \
              hs_timeout=250-60000 mtu=512 force_version=dtls12" \
             0 \
-            -c "fragmenting handshake message" \
+            -c "fragmenting Certificate handshake message" \
             -C "error"
 
 ## the test below will time out with certain seed.
@@ -10957,7 +10784,7 @@ run_test    "DTLS fragmenting: 3d, openssl client, DTLS 1.2" \
              hs_timeout=250-60000 mtu=512 force_version=dtls12" \
             "$O_CLI -dtls1_2" \
             0 \
-            -s "fragmenting handshake message"
+            -s "fragmenting Certificate handshake message"
 
 # Tests for DTLS-SRTP (RFC 5764)
 requires_config_enabled MBEDTLS_SSL_DTLS_SRTP
@@ -11674,9 +11501,9 @@ run_test    "DTLS reordering: Buffer out-of-order handshake message on client" \
             hs_timeout=2500-60000" \
             0 \
             -c "Buffering HS message" \
-            -c "Next handshake message has been buffered - load"\
+            -c "Certificate handshake message has been buffered$"\
             -S "Buffering HS message" \
-            -S "Next handshake message has been buffered - load"\
+            -S "handshake message has been buffered"\
             -C "Injecting buffered CCS message" \
             -C "Remember CCS message" \
             -S "Injecting buffered CCS message" \
@@ -11694,9 +11521,9 @@ run_test    "DTLS reordering: Buffer out-of-order handshake message fragment on 
             -c "Buffering HS message" \
             -c "found fragmented DTLS handshake message"\
             -c "Next handshake message 1 not or only partially buffered" \
-            -c "Next handshake message has been buffered - load"\
+            -c "Certificate handshake message has been buffered and reassembled"\
             -S "Buffering HS message" \
-            -S "Next handshake message has been buffered - load"\
+            -S "handshake message has been buffered" \
             -C "Injecting buffered CCS message" \
             -C "Remember CCS message" \
             -S "Injecting buffered CCS message" \
@@ -11717,10 +11544,11 @@ run_test    "DTLS reordering: Buffer out-of-order hs msg before reassembling nex
             hs_timeout=2500-60000" \
             0 \
             -c "Buffering HS message" \
-            -c "Next handshake message has been buffered - load"\
+            -c "Certificate handshake message has been buffered and reassembled"\
+            -c "ServerKeyExchange handshake message has been buffered$"\
             -C "attempt to make space by freeing buffered messages" \
             -S "Buffering HS message" \
-            -S "Next handshake message has been buffered - load"\
+            -S "handshake message has been buffered" \
             -C "Injecting buffered CCS message" \
             -C "Remember CCS message" \
             -S "Injecting buffered CCS message" \
@@ -11744,7 +11572,7 @@ run_test    "DTLS reordering: Buffer out-of-order hs msg before reassembling nex
             -c "attempt to make space by freeing buffered future messages" \
             -c "Enough space available after freeing buffered HS messages" \
             -S "Buffering HS message" \
-            -S "Next handshake message has been buffered - load"\
+            -S "handshake message has been buffered" \
             -C "Injecting buffered CCS message" \
             -C "Remember CCS message" \
             -S "Injecting buffered CCS message" \
@@ -11760,9 +11588,9 @@ run_test    "DTLS reordering: Buffer out-of-order handshake message on server" \
             hs_timeout=2500-60000" \
             0 \
             -C "Buffering HS message" \
-            -C "Next handshake message has been buffered - load"\
+            -C "handshake message has been buffered" \
             -s "Buffering HS message" \
-            -s "Next handshake message has been buffered - load" \
+            -s "ClientKeyExchange handshake message has been buffered$" \
             -C "Injecting buffered CCS message" \
             -C "Remember CCS message" \
             -S "Injecting buffered CCS message" \
@@ -11779,9 +11607,9 @@ run_test    "DTLS reordering: Buffer out-of-order CCS message on client"\
             hs_timeout=2500-60000" \
             0 \
             -C "Buffering HS message" \
-            -C "Next handshake message has been buffered - load"\
+            -C "handshake message has been buffered" \
             -S "Buffering HS message" \
-            -S "Next handshake message has been buffered - load" \
+            -S "handshake message has been buffered" \
             -c "Injecting buffered CCS message" \
             -c "Remember CCS message" \
             -S "Injecting buffered CCS message" \
@@ -11797,9 +11625,9 @@ run_test    "DTLS reordering: Buffer out-of-order CCS message on server"\
             hs_timeout=2500-60000" \
             0 \
             -C "Buffering HS message" \
-            -C "Next handshake message has been buffered - load"\
+            -C "handshake message has been buffered" \
             -S "Buffering HS message" \
-            -S "Next handshake message has been buffered - load" \
+            -S "handshake message has been buffered" \
             -C "Injecting buffered CCS message" \
             -C "Remember CCS message" \
             -s "Injecting buffered CCS message" \
@@ -12035,10 +11863,11 @@ not_with_valgrind # risk of non-mbedtls peer timing out
 requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
 run_test    "DTLS proxy: 3d, openssl server, fragmentation" \
             -p "$P_PXY drop=5 delay=5 duplicate=5 protect_hvr=1" \
-            "$O_NEXT_SRV -dtls1_2 -mtu 768" \
-            "$P_CLI dgram_packing=0 dtls=1 hs_timeout=500-60000 tickets=0" \
+            "$O_NEXT_SRV -dtls1_2 -mtu 256" \
+            "$P_CLI dgram_packing=0 dtls=1 debug_level=2 hs_timeout=500-60000 tickets=0" \
             0 \
-            -c "HTTP/1.0 200 OK"
+            -c "HTTP/1.0 200 OK" \
+            -c "Certificate handshake message has been buffered and reassembled"
 
 requires_openssl_next
 client_needs_more_time 8
@@ -12046,10 +11875,11 @@ not_with_valgrind # risk of non-mbedtls peer timing out
 requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
 run_test    "DTLS proxy: 3d, openssl server, fragmentation, nbio" \
             -p "$P_PXY drop=5 delay=5 duplicate=5 protect_hvr=1" \
-            "$O_NEXT_SRV -dtls1_2 -mtu 768" \
-            "$P_CLI dgram_packing=0 dtls=1 hs_timeout=500-60000 nbio=2 tickets=0" \
+            "$O_NEXT_SRV -dtls1_2 -mtu 256" \
+            "$P_CLI dgram_packing=0 dtls=1 debug_level=2 hs_timeout=500-60000 nbio=2 tickets=0" \
             0 \
-            -c "HTTP/1.0 200 OK"
+            -c "HTTP/1.0 200 OK" \
+            -c "Certificate handshake message has been buffered and reassembled"
 
 requires_gnutls
 client_needs_more_time 6
@@ -12070,10 +11900,11 @@ requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
 run_test    "DTLS proxy: 3d, gnutls server, fragmentation" \
             -p "$P_PXY drop=5 delay=5 duplicate=5" \
             "$G_NEXT_SRV -u --mtu 512" \
-            "$P_CLI dgram_packing=0 dtls=1 hs_timeout=500-60000" \
+            "$P_CLI dgram_packing=0 dtls=1 debug_level=2 hs_timeout=500-60000" \
             0 \
             -s "Extra-header:" \
-            -c "Extra-header:"
+            -c "Extra-header:" \
+            -c "Certificate handshake message has been buffered and reassembled"
 
 requires_gnutls_next
 client_needs_more_time 8
@@ -12082,10 +11913,11 @@ requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
 run_test    "DTLS proxy: 3d, gnutls server, fragmentation, nbio" \
             -p "$P_PXY drop=5 delay=5 duplicate=5" \
             "$G_NEXT_SRV -u --mtu 512" \
-            "$P_CLI dgram_packing=0 dtls=1 hs_timeout=500-60000 nbio=2" \
+            "$P_CLI dgram_packing=0 dtls=1 debug_level=2 hs_timeout=500-60000 nbio=2" \
             0 \
             -s "Extra-header:" \
-            -c "Extra-header:"
+            -c "Extra-header:" \
+            -c "Certificate handshake message has been buffered and reassembled"
 
 requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
 run_test    "export keys functionality" \
@@ -13943,16 +13775,6 @@ run_test    "TLS 1.2 ClientHello indicating support for deflate compression meth
 # Handshake defragmentation testing
 
 # Most test cases are in opt-testcases/handshake-generated.sh
-
-requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
-requires_certificate_authentication
-run_test    "Handshake defragmentation on server: len=32, TLS 1.2 ClientHello (unsupported)" \
-            "$P_SRV debug_level=4 force_version=tls12 auth_mode=required" \
-            "$O_NEXT_CLI -tls1_2 -split_send_frag 32 -cert $DATA_FILES_PATH/server5.crt -key $DATA_FILES_PATH/server5.key" \
-            1 \
-            -s "The SSL configuration is tls12 only" \
-            -s "bad client hello message" \
-            -s "SSL - A message could not be parsed due to a syntactic error"
 
 # Test server-side buffer resizing with fragmented handshake on TLS1.2
 requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2

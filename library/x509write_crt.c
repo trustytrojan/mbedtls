@@ -32,7 +32,6 @@
 #endif /* MBEDTLS_PEM_WRITE_C */
 
 #include "psa/crypto.h"
-#include "psa_util_internal.h"
 #include "mbedtls/psa_util.h"
 
 void mbedtls_x509write_crt_init(mbedtls_x509write_cert *ctx)
@@ -94,7 +93,7 @@ int mbedtls_x509write_crt_set_issuer_name(mbedtls_x509write_cert *ctx,
 }
 
 int mbedtls_x509write_crt_set_serial_raw(mbedtls_x509write_cert *ctx,
-                                         unsigned char *serial, size_t serial_len)
+                                         const unsigned char *serial, size_t serial_len)
 {
     if (serial_len > MBEDTLS_X509_RFC5280_MAX_SERIAL_LEN) {
         return MBEDTLS_ERR_X509_BAD_INPUT_DATA;
@@ -393,10 +392,11 @@ int mbedtls_x509write_crt_der(mbedtls_x509write_cert *ctx,
     unsigned char hash[MBEDTLS_MD_MAX_SIZE];
     psa_status_t status = PSA_ERROR_CORRUPTION_DETECTED;
     psa_algorithm_t psa_algorithm;
+    psa_key_type_t key_type = mbedtls_pk_get_key_type(ctx->issuer_key);
 
     size_t sub_len = 0, pub_len = 0, sig_and_oid_len = 0, sig_len;
     size_t len = 0;
-    mbedtls_pk_type_t pk_alg;
+    mbedtls_pk_sigalg_t pk_alg;
     int write_sig_null_par;
 
     /*
@@ -408,15 +408,15 @@ int mbedtls_x509write_crt_der(mbedtls_x509write_cert *ctx,
 
     /* There's no direct way of extracting a signature algorithm
      * (represented as an element of mbedtls_pk_type_t) from a PK instance. */
-    if (mbedtls_pk_can_do(ctx->issuer_key, MBEDTLS_PK_RSA)) {
-        pk_alg = MBEDTLS_PK_RSA;
-    } else if (mbedtls_pk_can_do(ctx->issuer_key, MBEDTLS_PK_ECDSA)) {
-        pk_alg = MBEDTLS_PK_ECDSA;
+    if (PSA_KEY_TYPE_IS_RSA(key_type)) {
+        pk_alg = MBEDTLS_PK_SIGALG_RSA_PKCS1V15;
+    } else if (PSA_KEY_TYPE_IS_ECC(key_type)) {
+        pk_alg = MBEDTLS_PK_SIGALG_ECDSA;
     } else {
         return MBEDTLS_ERR_X509_INVALID_ALG;
     }
 
-    if ((ret = mbedtls_x509_oid_get_oid_by_sig_alg(pk_alg, ctx->md_alg,
+    if ((ret = mbedtls_x509_oid_get_oid_by_sig_alg((mbedtls_pk_sigalg_t) pk_alg, ctx->md_alg,
                                                    &sig_oid, &sig_oid_len)) != 0) {
         return ret;
     }
@@ -489,7 +489,7 @@ int mbedtls_x509write_crt_der(mbedtls_x509write_cert *ctx,
     /*
      *  Signature   ::=  AlgorithmIdentifier
      */
-    if (pk_alg == MBEDTLS_PK_ECDSA) {
+    if (pk_alg == MBEDTLS_PK_SIGALG_ECDSA) {
         /*
          * The AlgorithmIdentifier's parameters field must be absent for DSA/ECDSA signature
          * algorithms, see https://www.rfc-editor.org/rfc/rfc5480#page-17 and
@@ -571,8 +571,8 @@ int mbedtls_x509write_crt_der(mbedtls_x509write_cert *ctx,
     }
 
 
-    if ((ret = mbedtls_pk_sign(ctx->issuer_key, ctx->md_alg,
-                               hash, hash_length, sig, sizeof(sig), &sig_len)) != 0) {
+    if ((ret = mbedtls_pk_sign_ext(pk_alg, ctx->issuer_key, ctx->md_alg,
+                                   hash, hash_length, sig, sizeof(sig), &sig_len)) != 0) {
         return ret;
     }
 
@@ -587,7 +587,8 @@ int mbedtls_x509write_crt_der(mbedtls_x509write_cert *ctx,
     c2 = buf + size;
     MBEDTLS_ASN1_CHK_ADD(sig_and_oid_len, mbedtls_x509_write_sig(&c2, c,
                                                                  sig_oid, sig_oid_len,
-                                                                 sig, sig_len, pk_alg));
+                                                                 sig, sig_len,
+                                                                 pk_alg));
 
     /*
      * Memory layout after this step:

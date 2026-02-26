@@ -5,8 +5,6 @@
  *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
-#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
-
 #include "mbedtls/build_info.h"
 
 #include "mbedtls/platform.h"
@@ -84,13 +82,13 @@ int main(void)
 
 #if defined(MBEDTLS_MD_C)
     const char *crypto_so_filename = NULL;
-    void *crypto_so = dlopen(MBEDCRYPTO_SO_FILENAME, RTLD_NOW);
+    void *crypto_so = dlopen(TFPSACRYPTO_SO_FILENAME, RTLD_NOW);
     if (dlerror() == NULL) {
-        crypto_so_filename = MBEDCRYPTO_SO_FILENAME;
-    } else {
-        crypto_so = dlopen(TFPSACRYPTO_SO_FILENAME, RTLD_NOW);
-        CHECK_DLERROR("dlopen", TFPSACRYPTO_SO_FILENAME);
         crypto_so_filename = TFPSACRYPTO_SO_FILENAME;
+    } else {
+        crypto_so = dlopen(MBEDCRYPTO_SO_FILENAME, RTLD_NOW);
+        CHECK_DLERROR("dlopen", MBEDCRYPTO_SO_FILENAME);
+        crypto_so_filename = MBEDCRYPTO_SO_FILENAME;
     }
 #pragma GCC diagnostic push
     /* dlsym() returns an object pointer which is meant to be used as a
